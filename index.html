@@ -47,6 +47,8 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- html2canvas CDN for PNG export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         #map { height: 500px; width: 100%; }
         body { font-family: Arial, sans-serif; }
@@ -55,10 +57,24 @@
         .unvisited { color: red; }
         .ballpark-item { cursor: pointer; }
         .ballpark-item:hover { background-color: #f0f0f0; }
+        /* Mobile-responsive styles */
+        @media (max-width: 640px) {
+            #map { height: 300px; }
+            h1 { font-size: 1.5rem; }
+            h2 { font-size: 1.25rem; }
+            .grid-cols-2 { grid-template-columns: 1fr; }
+            .ballpark-list { max-height: 150px; font-size: 0.875rem; }
+            .export-button { font-size: 0.875rem; padding: 0.5rem 1rem; }
+        }
+        /* Hidden export container */
+        #export-container { position: absolute; left: -9999px; }
     </style>
 </head>
 <body class="p-4 bg-gray-100">
     <h1 class="text-2xl font-bold mb-4 text-center">MLB Ballparks Map</h1>
+    <div class="flex justify-center mb-4">
+        <button id="export-button" class="export-button bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Export Visited Parks as PNG</button>
+    </div>
     <div id="map" class="mb-4"></div>
     <div class="grid grid-cols-2 gap-4">
         <div>
@@ -70,6 +86,7 @@
             <ul id="unvisited-list" class="ballpark-list"></ul>
         </div>
     </div>
+    <div id="export-container"></div>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -109,7 +126,7 @@
         ];
 
         // Initialize the map
-        const map = L.map('map').setView([39.8283, -98.5795], 4); // Center of Continental US
+        const map = L.map('map').setView([39.8283, -98.5795], 4);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
@@ -131,41 +148,37 @@
 
         // Function to adjust marker positions based on zoom level
         function adjustMarkerPositions(zoom) {
-            const offset = zoom <= 5 ? 0.35 : 0; // Apply offset at zoom levels 5 or lower
+            const offset = zoom <= 5 ? 0.35 : 0;
             ballparks.forEach(ballpark => {
                 let lat = ballpark.lat;
                 let lng = ballpark.lng;
-                // Adjust positions for Chicago ballparks
-                if (ballpark.name === "Wrigley Field") { // Northernmost in Chicago
-                    lat += offset; // Move north
-                    lng -= offset; // Move west
-                } else if (ballpark.name === "Guaranteed Rate Field") { // Southernmost in Chicago
-                    lat -= offset; // Move south
-                    lng += offset; // Move east
+                if (ballpark.name === "Wrigley Field") {
+                    lat += offset;
+                    lng -= offset;
+                } else if (ballpark.name === "Guaranteed Rate Field") {
+                    lat -= offset;
+                    lng += offset;
                 }
-                // Adjust positions for New York ballparks
-                if (ballpark.name === "Yankee Stadium") { // Northernmost in New York
-                    lat += offset; // Move north
-                    lng -= offset; // Move west
-                } else if (ballpark.name === "Citi Field") { // Southernmost in New York
-                    lat -= offset; // Move south
-                    lng += offset; // Move east
+                if (ballpark.name === "Yankee Stadium") {
+                    lat += offset;
+                    lng -= offset;
+                } else if (ballpark.name === "Citi Field") {
+                    lat -= offset;
+                    lng += offset;
                 }
-                // Adjust positions for Los Angeles ballparks
-                if (ballpark.name === "Dodger Stadium") { // Northernmost in Los Angeles
-                    lat += offset; // Move north
-                    lng -= offset; // Move west
-                } else if (ballpark.name === "Angel Stadium") { // Southernmost in Los Angeles
-                    lat -= offset; // Move south
-                    lng += offset; // Move east
+                if (ballpark.name === "Dodger Stadium") {
+                    lat += offset;
+                    lng -= offset;
+                } else if (ballpark.name === "Angel Stadium") {
+                    lat -= offset;
+                    lng += offset;
                 }
-                // Adjust positions for San Francisco ballparks
-                if (ballpark.name === "Oracle Park") { // Northernmost in San Francisco
-                    lat += offset; // Move north
-                    lng -= offset; // Move west
-                } else if (ballpark.name === "Oakland Coliseum") { // Southernmost in San Francisco
-                    lat -= offset; // Move south
-                    lng += offset; // Move east
+                if (ballpark.name === "Oracle Park") {
+                    lat += offset;
+                    lng -= offset;
+                } else if (ballpark.name === "Oakland Coliseum") {
+                    lat -= offset;
+                    lng += offset;
                 }
                 ballpark.marker.setLatLng([lat, lng]);
             });
@@ -201,10 +214,91 @@
             });
         }
 
+        // Function to export visited parks as PNG
+        function exportVisitedParks() {
+            // Create export container
+            const exportContainer = document.getElementById('export-container');
+            exportContainer.innerHTML = '';
+            exportContainer.style.position = 'absolute';
+            exportContainer.style.left = '-9999px';
+            exportContainer.style.padding = '20px';
+            exportContainer.style.background = '#fff';
+            exportContainer.style.width = '600px';
+            exportContainer.style.fontFamily = 'Arial, sans-serif';
+
+            // Add visited parks list
+            const visitedTitle = document.createElement('h2');
+            visitedTitle.textContent = 'Visited Ballparks';
+            visitedTitle.style.color = '#000';
+            visitedTitle.style.marginBottom = '10px';
+            exportContainer.appendChild(visitedTitle);
+
+            const visitedList = document.createElement('ul');
+            const visitedParks = ballparks.filter(b => b.visited);
+            if (visitedParks.length === 0) {
+                const li = document.createElement('li');
+                li.textContent = 'No ballparks visited yet.';
+                visitedList.appendChild(li);
+            } else {
+                visitedParks.forEach(ballpark => {
+                    const li = document.createElement('li');
+                    li.textContent = `${ballpark.team} - ${ballpark.name} (${ballpark.city})`;
+                    li.style.color = 'green';
+                    visitedList.appendChild(li);
+                });
+            }
+            exportContainer.appendChild(visitedList);
+
+            // Create a new map for export
+            const exportMapDiv = document.createElement('div');
+            exportMapDiv.style.width = '580px';
+            exportMapDiv.style.height = '300px';
+            exportMapDiv.style.marginTop = '20px';
+            exportContainer.appendChild(exportMapDiv);
+
+            const exportMap = L.map(exportMapDiv).setView([39.8283, -98.5795], 4);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(exportMap);
+
+            // Add only visited markers to export map
+            visitedParks.forEach(ballpark => {
+                L.marker([ballpark.lat, ballpark.lng], { icon: greenIcon })
+                    .addTo(exportMap)
+                    .bindPopup(`<b>${ballpark.team} - ${ballpark.name}</b><br>${ballpark.city}`);
+            });
+
+            // Wait for map tiles to load before capturing
+            setTimeout(() => {
+                html2canvas(exportContainer, {
+                    useCORS: true,
+                    logging: false
+                }).then(canvas => {
+                    // Try downloading the PNG
+                    try {
+                        const link = document.createElement('a');
+                        link.download = 'visited_ballparks.png';
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                    } catch (e) {
+                        // Fallback: Open in new tab
+                        const dataUrl = canvas.toDataURL('image/png');
+                        const newTab = window.open();
+                        newTab.document.write('<img src="' + dataUrl + '" alt="Visited Ballparks" />');
+                    }
+                    // Clean up export map
+                    exportMap.remove();
+                }).catch(error => {
+                    console.error('Error generating PNG:', error);
+                    alert('Failed to generate PNG. Please try again or check the console for errors.');
+                });
+            }, 1000); // Delay to ensure map tiles load
+        }
+
         // Add markers for each ballpark
         ballparks.forEach(ballpark => {
             const marker = L.marker([ballpark.lat, ballpark.lng], { icon: blueIcon }).addTo(map);
-            ballpark.marker = marker; // Store marker reference
+            ballpark.marker = marker;
             marker.bindPopup(`<b>${ballpark.team} - ${ballpark.name}</b><br>${ballpark.city}`);
             marker.on('click', () => {
                 toggleVisited(ballpark);
@@ -215,6 +309,9 @@
         map.on('zoomend', () => {
             adjustMarkerPositions(map.getZoom());
         });
+
+        // Add export button event listener
+        document.getElementById('export-button').addEventListener('click', exportVisitedParks);
 
         // Initial list and marker position update
         updateLists();
