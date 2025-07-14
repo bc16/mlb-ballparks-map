@@ -1,0 +1,224 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLB Ballparks Map</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #map { height: 500px; width: 100%; }
+        body { font-family: Arial, sans-serif; }
+        .ballpark-list { max-height: 200px; overflow-y: auto; }
+        .visited { color: green; }
+        .unvisited { color: red; }
+        .ballpark-item { cursor: pointer; }
+        .ballpark-item:hover { background-color: #f0f0f0; }
+    </style>
+</head>
+<body class="p-4 bg-gray-100">
+    <h1 class="text-2xl font-bold mb-4 text-center">MLB Ballparks Map</h1>
+    <div id="map" class="mb-4"></div>
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <h2 class="text-xl font-semibold mb-2">Visited Ballparks</h2>
+            <ul id="visited-list" class="ballpark-list"></ul>
+        </div>
+        <div>
+            <h2 class="text-xl font-semibold mb-2">Unvisited Ballparks</h2>
+            <ul id="unvisited-list" class="ballpark-list"></ul>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // MLB ballparks data with approximate coordinates and team names
+        const ballparks = [
+            { name: "Fenway Park", team: "Boston Red Sox", city: "Boston, MA", lat: 42.3467, lng: -71.0972, visited: false, marker: null },
+            { name: "Yankee Stadium", team: "New York Yankees", city: "Bronx, NY", lat: 40.8296, lng: -73.9262, visited: false, marker: null },
+            { name: "Citi Field", team: "New York Mets", city: "Queens, NY", lat: 40.7571, lng: -73.8458, visited: false, marker: null },
+            { name: "Citizens Bank Park", team: "Philadelphia Phillies", city: "Philadelphia, PA", lat: 39.9058, lng: -75.1665, visited: false, marker: null },
+            { name: "Oriole Park at Camden Yards", team: "Baltimore Orioles", city: "Baltimore, MD", lat: 39.2839, lng: -76.6217, visited: false, marker: null },
+            { name: "Nationals Park", team: "Washington Nationals", city: "Washington, DC", lat: 38.8729, lng: -77.0074, visited: false, marker: null },
+            { name: "PNC Park", team: "Pittsburgh Pirates", city: "Pittsburgh, PA", lat: 40.4469, lng: -80.0057, visited: false, marker: null },
+            { name: "Great American Ball Park", team: "Cincinnati Reds", city: "Cincinnati, OH", lat: 39.0979, lng: -84.5066, visited: false, marker: null },
+            { name: "Progressive Field", team: "Cleveland Guardians", city: "Cleveland, OH", lat: 41.4959, lng: -81.6852, visited: false, marker: null },
+            { name: "Comerica Park", team: "Detroit Tigers", city: "Detroit, MI", lat: 42.3391, lng: -83.0485, visited: false, marker: null },
+            { name: "Guaranteed Rate Field", team: "Chicago White Sox", city: "Chicago, IL", lat: 41.8300, lng: -87.6332, visited: false, marker: null },
+            { name: "Wrigley Field", team: "Chicago Cubs", city: "Chicago, IL", lat: 41.9484, lng: -87.6553, visited: false, marker: null },
+            { name: "Target Field", team: "Minnesota Twins", city: "Minneapolis, MN", lat: 44.9817, lng: -93.2778, visited: false, marker: null },
+            { name: "Kauffman Stadium", team: "Kansas City Royals", city: "Kansas City, MO", lat: 39.0517, lng: -94.4803, visited: false, marker: null },
+            { name: "Busch Stadium", team: "St. Louis Cardinals", city: "St. Louis, MO", lat: 38.6226, lng: -90.1928, visited: false, marker: null },
+            { name: "American Family Field", team: "Milwaukee Brewers", city: "Milwaukee, WI", lat: 43.0280, lng: -87.9700, visited: false, marker: null },
+            { name: "Truist Park", team: "Atlanta Braves", city: "Atlanta, GA", lat: 33.8900, lng: -84.4678, visited: false, marker: null },
+            { name: "Tropicana Field", team: "Tampa Bay Rays", city: "St. Petersburg, FL", lat: 27.7683, lng: -82.6534, visited: false, marker: null },
+            { name: "loanDepot park", team: "Miami Marlins", city: "Miami, FL", lat: 25.7783, lng: -80.2196, visited: false, marker: null },
+            { name: "Minute Maid Park", team: "Houston Astros", city: "Houston, TX", lat: 29.7573, lng: -95.3554, visited: false, marker: null },
+            { name: "Globe Life Field", team: "Texas Rangers", city: "Arlington, TX", lat: 32.7473, lng: -97.0821, visited: false, marker: null },
+            { name: "Coors Field", team: "Colorado Rockies", city: "Denver, CO", lat: 39.7559, lng: -104.9942, visited: false, marker: null },
+            { name: "Chase Field", team: "Arizona Diamondbacks", city: "Phoenix, AZ", lat: 33.4453, lng: -112.0667, visited: false, marker: null },
+            { name: "Dodger Stadium", team: "Los Angeles Dodgers", city: "Los Angeles, CA", lat: 34.0739, lng: -118.2400, visited: false, marker: null },
+            { name: "Angel Stadium", team: "Los Angeles Angels", city: "Anaheim, CA", lat: 33.8003, lng: -117.8827, visited: false, marker: null },
+            { name: "Oakland Coliseum", team: "Oakland Athletics", city: "Oakland, CA", lat: 37.7516, lng: -122.2005, visited: false, marker: null },
+            { name: "Oracle Park", team: "San Francisco Giants", city: "San Francisco, CA", lat: 37.7786, lng: -122.3893, visited: false, marker: null },
+            { name: "Petco Park", team: "San Diego Padres", city: "San Diego, CA", lat: 32.7076, lng: -117.1570, visited: false, marker: null },
+            { name: "T-Mobile Park", team: "Seattle Mariners", city: "Seattle, WA", lat: 47.5914, lng: -122.3325, visited: false, marker: null },
+            { name: "Rogers Centre", team: "Toronto Blue Jays", city: "Toronto, ON", lat: 43.6414, lng: -79.3894, visited: false, marker: null }
+        ];
+
+        // Initialize the map
+        const map = L.map('map').setView([39.8283, -98.5795], 4); // Center of Continental US
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Define custom icons
+        const blueIcon = L.icon({
+            iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34]
+        });
+
+        const greenIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34]
+        });
+
+        // Function to adjust marker positions based on zoom level
+        function adjustMarkerPositions(zoom) {
+            const offset = zoom <= 5 ? 0.35 : 0; // Apply offset at zoom levels 5 or lower
+            ballparks.forEach(ballpark => {
+                let lat = ballpark.lat;
+                let lng = ballpark.lng;
+                // Adjust positions for Chicago ballparks
+                if (ballpark.name === "Wrigley Field") { // Northernmost in Chicago
+                    lat += offset; // Move north
+                    lng -= offset; // Move west
+                } else if (ballpark.name === "Guaranteed Rate Field") { // Southernmost in Chicago
+                    lat -= offset; // Move south
+                    lng += offset; // Move east
+                }
+                // Adjust positions for New York ballparks
+                if (ballpark.name === "Yankee Stadium") { // Northernmost in New York
+                    lat += offset; // Move north
+                    lng -= offset; // Move west
+                } else if (ballpark.name === "Citi Field") { // Southernmost in New York
+                    lat -= offset; // Move south
+                    lng += offset; // Move east
+                }
+                // Adjust positions for Los Angeles ballparks
+                if (ballpark.name === "Dodger Stadium") { // Northernmost in Los Angeles
+                    lat += offset; // Move north
+                    lng -= offset; // Move west
+                } else if (ballpark.name === "Angel Stadium") { // Southernmost in Los Angeles
+                    lat -= offset; // Move south
+                    lng += offset; // Move east
+                }
+                // Adjust positions for San Francisco ballparks
+                if (ballpark.name === "Oracle Park") { // Northernmost in San Francisco
+                    lat += offset; // Move north
+                    lng -= offset; // Move west
+                } else if (ballpark.name === "Oakland Coliseum") { // Southernmost in San Francisco
+                    lat -= offset; // Move south
+                    lng += offset; // Move east
+                }
+                ballpark.marker.setLatLng([lat, lng]);
+            });
+        }
+
+        // Function to toggle visited status
+        function toggleVisited(ballpark) {
+            ballpark.visited = !ballpark.visited;
+            ballpark.marker.setIcon(ballpark.visited ? greenIcon : blueIcon);
+            updateLists();
+        }
+
+        // Function to update the lists
+        function updateLists() {
+            const visitedList = document.getElementById('visited-list');
+            const unvisitedList = document.getElementById('unvisited-list');
+            visitedList.innerHTML = '';
+            unvisitedList.innerHTML = '';
+
+            ballparks.forEach(ballpark => {
+                const li = document.createElement('li');
+                li.textContent = `${ballpark.team} - ${ballpark.name} (${ballpark.city})`;
+                li.className = `ballpark-item ${ballpark.visited ? 'visited' : 'unvisited'}`;
+                li.addEventListener('click', () => {
+                    toggleVisited(ballpark);
+                    ballpark.marker.openPopup();
+                });
+                if (ballpark.visited) {
+                    visitedList.appendChild(li);
+                } else {
+                    unvisitedList.appendChild(li);
+                }
+            });
+        }
+
+        // Add markers for each ballpark
+        ballparks.forEach(ballpark => {
+            const marker = L.marker([ballpark.lat, ballpark.lng], { icon: blueIcon }).addTo(map);
+            ballpark.marker = marker; // Store marker reference
+            marker.bindPopup(`<b>${ballpark.team} - ${ballpark.name}</b><br>${ballpark.city}`);
+            marker.on('click', () => {
+                toggleVisited(ballpark);
+            });
+        });
+
+        // Adjust markers on zoom change
+        map.on('zoomend', () => {
+            adjustMarkerPositions(map.getZoom());
+        });
+
+        // Initial list and marker position update
+        updateLists();
+        adjustMarkerPositions(map.getZoom());
+    </script>
+</body>
+</html>
